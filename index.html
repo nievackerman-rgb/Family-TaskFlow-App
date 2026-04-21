@@ -14158,27 +14158,51 @@ async function createFirebaseHistoryBackup() {
       const emptyState = document.getElementById('events-empty');
       const events = state.events || [];
       
-      const upcomingCount = events.filter(e => getDaysUntilEvent(e) >= 0 && getDaysUntilEvent(e) <= 30).length;
+      // Build flat list of occurrences — events with BOTH dates enabled produce 2 entries
+      const occurrences = [];
+      events.forEach(e => {
+        const evOccs = getEventOccurrences(e);
+        if (evOccs.length === 0) return;
+        evOccs.forEach(occ => {
+          occurrences.push({ ...e, daysUntil: occ.daysUntil, occurrenceType: occ.dateType });
+        });
+      });
+      
+      const upcomingCount = occurrences.filter(o => o.daysUntil >= 0 && o.daysUntil <= 30).length;
       const countEl = document.getElementById('count-events');
       if (countEl) countEl.textContent = upcomingCount || '';
       
       if (events.length === 0) { container.innerHTML = ''; emptyState.classList.remove('hidden'); return; }
       emptyState.classList.add('hidden');
       
-      const sortedEvents = [...events].map(e => ({...e, daysUntil: getDaysUntilEvent(e)})).sort((a, b) => a.daysUntil - b.daysUntil);
+      occurrences.sort((a, b) => a.daysUntil - b.daysUntil);
       
       let html = '<div class="space-y-2">';
-      sortedEvents.forEach(e => {
+      occurrences.forEach(e => {
         const typeIcons = { 'birthday': '🎂', 'anniversary': '💍', 'memorial': '🕯️', 'other': '📅' };
         const icon = typeIcons[e.type] || '📅';
         const daysText = e.daysUntil === 0 ? 'היום!' : e.daysUntil === 1 ? 'מחר' : e.daysUntil < 0 ? `לפני ${Math.abs(e.daysUntil)} ימים` : `בעוד ${e.daysUntil} ימים`;
         const age = e.birthYear ? new Date().getFullYear() - e.birthYear : null;
         
+        // Show occurrence-type badge only when event has BOTH dates enabled
+        const hasBoth = (e.showGregorian !== false && e.month && e.day) && (e.showHebrew && e.hebrewMonth && e.hebrewDay);
+        const occBadge = hasBoth ? (e.occurrenceType === 'hebrew' ? '<span class="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">✡️ עברי</span>' : '<span class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">🗓️ לועזי</span>') : '';
+        
+        // Date string for this specific occurrence
+        let dateStr = '';
+        if (e.occurrenceType === 'gregorian' && e.month && e.day) {
+          dateStr = `${e.day}/${e.month}`;
+        } else if (e.occurrenceType === 'hebrew' && e.hebrewMonth && e.hebrewDay) {
+          const monthNames = getHebrewMonthsForYear(e.hebrewYear || 5786);
+          const monthName = monthNames.find(m => m.num === e.hebrewMonth)?.name || '';
+          dateStr = `${hebrewDayNames[e.hebrewDay] || e.hebrewDay} ${monthName}`;
+        }
+        
         html += `<div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer" onclick="showEventDetails('${e.id}')">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3"><span class="text-2xl">${icon}</span>
-              <div><div class="font-medium text-gray-800">${escapeHtml(e.name)}</div>
-                <div class="text-sm text-gray-500">${formatEventDate(e)} ${age ? '· גיל ' + age : ''}</div></div></div>
+              <div><div class="font-medium text-gray-800 flex items-center gap-2">${escapeHtml(e.name)} ${occBadge}</div>
+                <div class="text-sm text-gray-500">${dateStr} ${age ? '· גיל ' + age : ''}</div></div></div>
             <div class="text-left"><div class="font-semibold ${e.daysUntil <= 7 ? 'text-pink-600' : 'text-gray-800'}">${daysText}</div></div>
           </div></div>`;
       });
@@ -14187,36 +14211,44 @@ async function createFirebaseHistoryBackup() {
       container.innerHTML = html;
     }
     
-    function getDaysUntilEvent(event) {
+    // Returns an array of upcoming occurrences for an event, one per enabled date type.
+    // Each entry: { dateType: 'gregorian'|'hebrew', daysUntil: number, date: Date }
+    function getEventOccurrences(event) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const occurrences = [];
       
-      // Check Gregorian date
+      // Gregorian occurrence
       if (event.showGregorian !== false && event.month && event.day) {
         let nextOccurrence = new Date(today.getFullYear(), event.month - 1, event.day);
         if (nextOccurrence < today) nextOccurrence.setFullYear(nextOccurrence.getFullYear() + 1);
-        return Math.round((nextOccurrence - today) / (1000 * 60 * 60 * 24));
+        const daysUntil = Math.round((nextOccurrence - today) / (1000 * 60 * 60 * 24));
+        occurrences.push({ dateType: 'gregorian', daysUntil, date: nextOccurrence });
       }
       
-      // Check Hebrew date
+      // Hebrew occurrence
       if (event.showHebrew && event.hebrewMonth && event.hebrewDay) {
         const currentHeb = getFullHebrewDate(today.getFullYear(), today.getMonth(), today.getDate());
         let targetYear = currentHeb.year;
-        
-        // Calculate target date
         let gregDate = hebrewToGregorian(targetYear, event.hebrewMonth, event.hebrewDay);
         let targetDate = new Date(gregDate.year, gregDate.month - 1, gregDate.day);
-        
-        // If past, try next year
         if (targetDate < today) {
           gregDate = hebrewToGregorian(targetYear + 1, event.hebrewMonth, event.hebrewDay);
           targetDate = new Date(gregDate.year, gregDate.month - 1, gregDate.day);
         }
-        
-        return Math.round((targetDate - today) / (1000 * 60 * 60 * 24));
+        const daysUntil = Math.round((targetDate - today) / (1000 * 60 * 60 * 24));
+        occurrences.push({ dateType: 'hebrew', daysUntil, date: targetDate });
       }
       
-      return 999;
+      return occurrences;
+    }
+    
+    // Returns the days until the NEAREST upcoming occurrence (Gregorian or Hebrew).
+    // Used for sorting and default "days until" display.
+    function getDaysUntilEvent(event) {
+      const occurrences = getEventOccurrences(event);
+      if (occurrences.length === 0) return 999;
+      return Math.min(...occurrences.map(o => o.daysUntil));
     }
     
     function formatEventDate(event) {
@@ -14284,15 +14316,19 @@ async function createFirebaseHistoryBackup() {
               <option value="other" ${event?.type === 'other' ? 'selected' : ''}>📅 אחר</option>
             </select></div>
           
+          <!-- Display mode: three-way choice -->
+          <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <div class="text-sm font-medium text-gray-700 mb-2">תצוגה ביומן:</div>
+            <div class="grid grid-cols-1 gap-1.5">
+              <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="event-display-mode" value="gregorian" ${(event?.showGregorian !== false && !event?.showHebrew) ? 'checked' : ''}><span>🗓️ רק תאריך לועזי</span></label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="event-display-mode" value="hebrew" ${(event?.showHebrew && event?.showGregorian === false) ? 'checked' : ''}><span>✡️ רק תאריך עברי</span></label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="event-display-mode" value="both" ${(event?.showGregorian !== false && event?.showHebrew) ? 'checked' : ''}><span>🗓️ + ✡️ שניהם — יופיע פעמיים ביומן</span></label>
+            </div>
+          </div>
+          
           <!-- Gregorian Date Section -->
           <div class="bg-blue-50 p-3 rounded-lg">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-sm font-medium text-blue-800">📅 תאריך לועזי</span>
-              <label class="flex items-center gap-2 text-sm">
-                <input type="checkbox" id="event-show-gregorian" ${event?.showGregorian !== false ? 'checked' : ''} class="rounded">
-                <span class="text-gray-600">הצג ביומן</span>
-              </label>
-            </div>
+            <div class="text-sm font-medium text-blue-800 mb-2">📅 תאריך לועזי</div>
             <div class="grid grid-cols-3 gap-2">
               <div><label class="block text-xs text-gray-500 mb-1">יום</label>
                 <input type="number" min="1" max="31" id="event-day" value="${event?.day || ''}" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm"></div>
@@ -14308,13 +14344,7 @@ async function createFirebaseHistoryBackup() {
           
           <!-- Hebrew Date Section -->
           <div class="bg-amber-50 p-3 rounded-lg">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-sm font-medium text-amber-800">📅 תאריך עברי</span>
-              <label class="flex items-center gap-2 text-sm">
-                <input type="checkbox" id="event-show-hebrew" ${event?.showHebrew ? 'checked' : ''} class="rounded">
-                <span class="text-gray-600">הצג ביומן</span>
-              </label>
-            </div>
+            <div class="text-sm font-medium text-amber-800 mb-2">📅 תאריך עברי</div>
             <div class="grid grid-cols-3 gap-2">
               <div><label class="block text-xs text-gray-500 mb-1">יום</label>
                 <select id="event-hebrew-day" class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
@@ -14332,7 +14362,7 @@ async function createFirebaseHistoryBackup() {
                   ${hebrewYears.slice().reverse().map(y => `<option value="${y.value}" ${event?.hebrewYear === y.value ? 'selected' : ''}>${y.label}</option>`).join('')}
                 </select></div>
             </div>
-            <p class="text-xs text-amber-600 mt-2">💡 אפשר למלא רק לועזי, רק עברי, או שניהם</p>
+            <p class="text-xs text-amber-600 mt-2">💡 מלא את התאריכים לפי בחירת התצוגה למעלה</p>
           </div>
           
           <div><label class="block text-sm font-medium text-gray-700 mb-1">תזכורת (ימים לפני)</label>
@@ -14370,11 +14400,14 @@ async function createFirebaseHistoryBackup() {
       const day = parseInt(document.getElementById('event-day').value) || null;
       const month = parseInt(document.getElementById('event-month').value) || null;
       const birthYear = parseInt(document.getElementById('event-year').value) || null;
-      const showGregorian = document.getElementById('event-show-gregorian').checked;
       const hebrewDay = parseInt(document.getElementById('event-hebrew-day').value) || null;
       const hebrewMonth = parseInt(document.getElementById('event-hebrew-month').value) || null;
       const hebrewYear = parseInt(document.getElementById('event-hebrew-year').value) || null;
-      const showHebrew = document.getElementById('event-show-hebrew').checked;
+      // Three-way display mode
+      const modeEl = document.querySelector('input[name="event-display-mode"]:checked');
+      const displayMode = modeEl ? modeEl.value : 'gregorian';
+      const showGregorian = (displayMode === 'gregorian' || displayMode === 'both');
+      const showHebrew = (displayMode === 'hebrew' || displayMode === 'both');
       const reminderDays = parseInt(document.getElementById('event-reminder').value);
       const notes = document.getElementById('event-notes').value.trim();
       
@@ -18441,7 +18474,10 @@ function renderCompletedRow(task) {
         dayEvents.forEach(e => {
           const typeIcons = { 'birthday': '🎂', 'anniversary': '💍', 'memorial': '🕯️', 'other': '📅' };
           const icon = typeIcons[e.type] || '📅';
-          itemsHtml += `<div class="calendar-event text-[10px] bg-pink-100 text-pink-800 px-1 rounded truncate cursor-pointer" onclick="event.stopPropagation(); showEventDetails('${e.id}')">${icon} ${escapeHtml(e.name)}</div>`;
+          // Show occurrence-type badge when event has BOTH dates enabled
+          const hasBoth = (e.showGregorian !== false && e.month && e.day) && (e.showHebrew && e.hebrewMonth && e.hebrewDay);
+          const occIcon = hasBoth ? (e.dateType === 'hebrew' ? '✡️ ' : '🗓️ ') : '';
+          itemsHtml += `<div class="calendar-event text-[10px] bg-pink-100 text-pink-800 px-1 rounded truncate cursor-pointer" onclick="event.stopPropagation(); showEventDetails('${e.id}')">${occIcon}${icon} ${escapeHtml(e.name)}</div>`;
         });
         
         // Renewals
@@ -18655,8 +18691,11 @@ function renderCompletedRow(task) {
           const typeIcons = { 'birthday': '🎂', 'anniversary': '💍', 'memorial': '🕯️', 'other': '📅' };
           const owner = e.ownerId ? state.employees?.find(emp => emp.id === e.ownerId) : null;
           const borderColor = owner?.color || '#ec4899';
+          // Show occurrence-type badge when event has BOTH dates enabled
+          const hasBoth = (e.showGregorian !== false && e.month && e.day) && (e.showHebrew && e.hebrewMonth && e.hebrewDay);
+          const occIcon = hasBoth ? (e.dateType === 'hebrew' ? '✡️ ' : '🗓️ ') : '';
           itemsHtml += `<div class="text-xs bg-pink-50 text-pink-800 px-2 py-1 rounded mb-1 border-r-4 cursor-pointer hover:bg-pink-100" style="border-color:${borderColor}" 
-            onclick="showEventDetails('${e.id}')" draggable="true" ondragstart="dragCalendarItem(event, 'event', '${e.id}')">${typeIcons[e.type] || '📅'} ${escapeHtml(e.name)}</div>`;
+            onclick="showEventDetails('${e.id}')" draggable="true" ondragstart="dragCalendarItem(event, 'event', '${e.id}')">${occIcon}${typeIcons[e.type] || '📅'} ${escapeHtml(e.name)}</div>`;
         });
         
         // Renewals
@@ -18879,12 +18918,16 @@ END:VEVENT
         
         const dayTasks = (state.tasks || []).filter(t => t.dueDate && t.dueDate.startsWith(dateStr) && t.status === 'open');
         const dayRenewals = (state.renewals || []).filter(r => r.nextDate === dateStr);
-        const dayEvents = (state.events || []).filter(e => e.month === (current.getMonth() + 1) && e.day === d);
+        const dayEvents = getEventsForDate(year, current.getMonth(), d);
         const dayHolidays = getJewishHolidays(year, current.getMonth()).filter(h => h.day === d);
         
         let itemsHtml = '';
         dayHolidays.forEach(h => itemsHtml += `<div class="item holiday">${h.icon} ${h.name}</div>`);
-        dayEvents.forEach(e => itemsHtml += `<div class="item event">🎂 ${e.name}</div>`);
+        dayEvents.forEach(e => {
+          const hasBoth = (e.showGregorian !== false && e.month && e.day) && (e.showHebrew && e.hebrewMonth && e.hebrewDay);
+          const occIcon = hasBoth ? (e.dateType === 'hebrew' ? '✡️ ' : '🗓️ ') : '';
+          itemsHtml += `<div class="item event">${occIcon}🎂 ${e.name}</div>`;
+        });
         dayRenewals.forEach(r => itemsHtml += `<div class="item renewal">⏰ ${r.name}</div>`);
         dayTasks.forEach(t => itemsHtml += `<div class="item task">📋 ${t.title}</div>`);
         
