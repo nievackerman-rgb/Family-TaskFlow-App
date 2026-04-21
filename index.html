@@ -17749,15 +17749,48 @@ function renderCompletedRow(task) {
     // Calendar Render Logic
     // -----------------------------
             // =============================================
-            // HEBREW CALENDAR UTILITIES - ACCURATE VERSION
+            // HEBREW CALENDAR UTILITIES - using built-in Intl
+            // Month numbering: 1=Tishrei, 2=Cheshvan, 3=Kislev, 4=Tevet,
+            //                  5=Shevat, 6=Adar (or Adar I in leap),
+            //                  7=Adar II (leap only), 8=Nisan, 9=Iyar,
+            //                  10=Sivan, 11=Tammuz, 12=Av, 13=Elul
             // =============================================
             
-            // Hebrew month names (starting from Tishrei as month 1)
             const hebrewMonthNames = ['', 'תשרי', 'חשון', 'כסלו', 'טבת', 'שבט', 'אדר', 'אדר ב׳', 'ניסן', 'אייר', 'סיון', 'תמוז', 'אב', 'אלול'];
             const hebrewDayNames = ['', 'א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ז׳', 'ח׳', 'ט׳', 'י׳', 'י״א', 'י״ב', 'י״ג', 'י״ד', 'ט״ו', 'ט״ז', 'י״ז', 'י״ח', 'י״ט', 'כ׳', 'כ״א', 'כ״ב', 'כ״ג', 'כ״ד', 'כ״ה', 'כ״ו', 'כ״ז', 'כ״ח', 'כ״ט', 'ל׳'];
             const gregorianMonthsHeb = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
             
-            // Accurate Hebrew calendar calculation
+            // Map English month names from Intl to our numeric scheme
+            const _HEB_MONTH_BY_NAME_REGULAR = {
+              'Tishri': 1, 'Tishrei': 1,
+              'Heshvan': 2, 'Cheshvan': 2, 'Marcheshvan': 2,
+              'Kislev': 3,
+              'Tevet': 4, 'Teveth': 4,
+              'Shevat': 5, "Sh'vat": 5,
+              'Adar': 6,
+              'Nisan': 8,
+              'Iyar': 9, 'Iyyar': 9,
+              'Sivan': 10,
+              'Tamuz': 11, 'Tammuz': 11,
+              'Av': 12,
+              'Elul': 13
+            };
+            const _HEB_MONTH_BY_NAME_LEAP = {
+              'Tishri': 1, 'Tishrei': 1,
+              'Heshvan': 2, 'Cheshvan': 2, 'Marcheshvan': 2,
+              'Kislev': 3,
+              'Tevet': 4, 'Teveth': 4,
+              'Shevat': 5, "Sh'vat": 5,
+              'Adar I': 6, 'Adar 1': 6, 'Adar Rishon': 6,
+              'Adar II': 7, 'Adar 2': 7, 'Adar Sheni': 7,
+              'Nisan': 8,
+              'Iyar': 9, 'Iyyar': 9,
+              'Sivan': 10,
+              'Tamuz': 11, 'Tammuz': 11,
+              'Av': 12,
+              'Elul': 13
+            };
+            
             function isHebrewLeapYear(year) {
               return ((7 * year + 1) % 19) < 7;
             }
@@ -17766,213 +17799,147 @@ function renderCompletedRow(task) {
               return isHebrewLeapYear(year) ? 13 : 12;
             }
             
-            function getHebrewYearDays(year) {
-              return hebrewElapsedDays(year + 1) - hebrewElapsedDays(year);
+            function _intlHebrewParts(gYear, gMonth, gDay) {
+              // gMonth is 0-indexed to match original API
+              const d = new Date(Date.UTC(gYear, gMonth, gDay, 12, 0, 0));
+              const fmt = new Intl.DateTimeFormat('en-u-ca-hebrew', {
+                timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric'
+              });
+              const parts = fmt.formatToParts(d);
+              let monthName = '', dayNum = 0, yearNum = 0;
+              for (const p of parts) {
+                if (p.type === 'month') monthName = p.value;
+                else if (p.type === 'day') dayNum = parseInt(p.value, 10);
+                else if (p.type === 'year') yearNum = parseInt(p.value.replace(/[^\d]/g, ''), 10);
+              }
+              return { monthName: monthName, day: dayNum, year: yearNum };
             }
             
-            function hebrewElapsedDays(year) {
-              const monthsElapsed = Math.floor((235 * year - 234) / 19);
-              const partsElapsed = 12084 + 13753 * monthsElapsed;
-              const day = 29 * monthsElapsed + Math.floor(partsElapsed / 25920);
-              const parts = partsElapsed % 25920;
-              
-              const dayOfWeek = day % 7;
-              let altDay = day;
-              
-              // Postponement rules
-              if (parts >= 19440 || 
-                  (dayOfWeek === 2 && parts >= 9924 && !isHebrewLeapYear(year)) ||
-                  (dayOfWeek === 1 && parts >= 16789 && isHebrewLeapYear(year - 1))) {
-                altDay = day + 1;
+            function gregorianToHebrew(gYear, gMonth, gDay) {
+              const parts = _intlHebrewParts(gYear, gMonth, gDay);
+              const leap = isHebrewLeapYear(parts.year);
+              const map = leap ? _HEB_MONTH_BY_NAME_LEAP : _HEB_MONTH_BY_NAME_REGULAR;
+              const month = map[parts.monthName];
+              if (!month) {
+                console.warn('Unknown Hebrew month from Intl:', parts.monthName, '(year', parts.year, 'leap:', leap, ')');
+                return { year: parts.year, month: 1, day: parts.day };
               }
-              
-              const altDayOfWeek = altDay % 7;
-              if (altDayOfWeek === 0 || altDayOfWeek === 3 || altDayOfWeek === 5) {
-                altDay += 1;
-              }
-              
-              return altDay;
+              return { year: parts.year, month: month, day: parts.day };
+            }
+            
+            function getHebrewYearDays(year) {
+              const a = hebrewToGregorian(year, 1, 1);
+              const b = hebrewToGregorian(year + 1, 1, 1);
+              const dA = new Date(Date.UTC(a.year, a.month - 1, a.day));
+              const dB = new Date(Date.UTC(b.year, b.month - 1, b.day));
+              return Math.round((dB - dA) / 86400000);
             }
             
             function getHebrewMonthDays(year, month) {
-              // month: 1=Tishrei, 2=Cheshvan, etc.
+              const leap = isHebrewLeapYear(year);
+              if (month === 1) return 30; // Tishrei
               if (month === 2) { // Cheshvan
-                const yearDays = getHebrewYearDays(year);
-                return (yearDays % 10 === 5) ? 30 : 29;
+                const len = getHebrewYearDays(year);
+                return (len === 355 || len === 385) ? 30 : 29;
               }
               if (month === 3) { // Kislev
-                const yearDays = getHebrewYearDays(year);
-                return (yearDays % 10 === 3) ? 29 : 30;
+                const len = getHebrewYearDays(year);
+                return (len === 353 || len === 383) ? 29 : 30;
               }
-              if (month === 6) { // Adar (or Adar I in leap year)
-                return isHebrewLeapYear(year) ? 30 : 29;
-              }
-              if (month === 7) { // Adar II (only in leap year)
-                return 29;
-              }
-              // Standard months
-              if ([1, 5, 8, 10, 12].includes(month)) return 30;
-              if ([4, 9, 11, 13].includes(month)) return 29;
+              if (month === 4) return 29; // Tevet
+              if (month === 5) return 30; // Shevat
+              if (month === 6) return leap ? 30 : 29; // Adar / Adar I
+              if (month === 7) return leap ? 29 : 0;  // Adar II (leap only)
+              if (month === 8) return 30; // Nisan
+              if (month === 9) return 29; // Iyar
+              if (month === 10) return 30; // Sivan
+              if (month === 11) return 29; // Tammuz
+              if (month === 12) return 30; // Av
+              if (month === 13) return 29; // Elul
               return 30;
             }
             
-            // Convert Gregorian to Hebrew date
-            function gregorianToHebrew(gYear, gMonth, gDay) {
-              // Calculate days since epoch
-              const gregorianEpoch = 1721425.5;
-              
-              // Julian day number
-              const a = Math.floor((14 - (gMonth + 1)) / 12);
-              const y = gYear + 4800 - a;
-              const m = (gMonth + 1) + 12 * a - 3;
-              const jd = gDay + Math.floor((153 * m + 2) / 5) + 365 * y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045;
-              
-              // Hebrew epoch (1 Tishrei 1 = Oct 7, 3761 BCE)
-              const hebrewEpoch = 347995.5;
-              const daysSinceEpoch = jd - hebrewEpoch;
-              
-              // Estimate Hebrew year
-              let hYear = Math.floor((daysSinceEpoch + 0.5) / 365.25) + 1;
-              
-              // Adjust year
-              while (hebrewElapsedDays(hYear) <= daysSinceEpoch) {
-                hYear++;
+            function hebrewToGregorian(hYear, hMonth, hDay) {
+              // Binary search the Gregorian date whose Hebrew conversion matches.
+              const estimateGYear = hYear - 3761;
+              const loDate = new Date(Date.UTC(estimateGYear, 7, 1, 12, 0, 0));  // Aug 1 previous civil year
+              const hiDate = new Date(Date.UTC(estimateGYear + 1, 11, 31, 12, 0, 0));
+              let loDay = Math.floor(loDate.getTime() / 86400000);
+              let hiDay = Math.floor(hiDate.getTime() / 86400000);
+              const targetKey = hYear * 10000 + hMonth * 100 + hDay;
+              while (loDay <= hiDay) {
+                const midDay = Math.floor((loDay + hiDay) / 2);
+                const midDate = new Date(midDay * 86400000);
+                const h = gregorianToHebrew(midDate.getUTCFullYear(), midDate.getUTCMonth(), midDate.getUTCDate());
+                const midKey = h.year * 10000 + h.month * 100 + h.day;
+                if (midKey === targetKey) {
+                  return { year: midDate.getUTCFullYear(), month: midDate.getUTCMonth() + 1, day: midDate.getUTCDate() };
+                }
+                if (midKey < targetKey) loDay = midDay + 1;
+                else hiDay = midDay - 1;
               }
-              hYear--;
-              
-              // Calculate day within year
-              let dayOfYear = daysSinceEpoch - hebrewElapsedDays(hYear) + 1;
-              
-              // Find month
-              let hMonth = 1;
-              const numMonths = getHebrewMonthsInYear(hYear);
-              
-              while (dayOfYear > getHebrewMonthDays(hYear, hMonth)) {
-                dayOfYear -= getHebrewMonthDays(hYear, hMonth);
-                hMonth++;
-                if (hMonth > numMonths) break;
-              }
-              
-              const hDay = Math.floor(dayOfYear);
-              
-              return { year: hYear, month: hMonth, day: hDay };
+              // Fallback: should not happen for valid inputs
+              return { year: estimateGYear, month: 1, day: 1 };
             }
             
             function getHebrewDateString(gYear, gMonth, gDay) {
               const heb = gregorianToHebrew(gYear, gMonth, gDay);
               const dayStr = hebrewDayNames[heb.day] || heb.day;
-              
-              // Handle Adar in leap year vs non-leap year
               let monthStr = hebrewMonthNames[heb.month] || '';
               if (heb.month === 6 && !isHebrewLeapYear(heb.year)) {
                 monthStr = 'אדר';
               }
-              
               return `${dayStr} ${monthStr}`;
             }
             
             function getFullHebrewDate(gYear, gMonth, gDay) {
               const heb = gregorianToHebrew(gYear, gMonth, gDay);
               const dayStr = hebrewDayNames[heb.day] || heb.day;
-              
               let monthStr = hebrewMonthNames[heb.month] || '';
               if (heb.month === 6 && !isHebrewLeapYear(heb.year)) {
                 monthStr = 'אדר';
               }
-              
               const yearStr = formatHebrewYear(heb.year);
               return { day: heb.day, dayStr, month: heb.month, monthStr, year: heb.year, yearStr, full: `${dayStr} ${monthStr} ${yearStr}` };
             }
             
             function formatHebrewYear(year) {
-              // Format year as Hebrew letters (e.g., 5786 -> תשפ"ו)
-              const thousands = Math.floor(year / 1000);
               const remainder = year % 1000;
               const hundreds = Math.floor(remainder / 100);
               const tens = Math.floor((remainder % 100) / 10);
               const ones = remainder % 10;
-              
               const hundredsLetters = ['', 'ק', 'ר', 'ש', 'ת', 'תק', 'תר', 'תש', 'תת', 'תתק'];
               const tensLetters = ['', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ'];
               const onesLetters = ['', 'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט'];
-              
               let result = hundredsLetters[hundreds] || '';
-              
-              // Handle 15 and 16 specially (ט"ו and ט"ז instead of י"ה and י"ו)
-              if (tens === 1 && ones === 5) {
-                result += 'טו';
-              } else if (tens === 1 && ones === 6) {
-                result += 'טז';
-              } else {
-                result += tensLetters[tens] + onesLetters[ones];
-              }
-              
-              // Add quotation mark before last letter
-              if (result.length > 1) {
-                result = result.slice(0, -1) + '״' + result.slice(-1);
-              } else if (result.length === 1) {
-                result += '׳';
-              }
-              
+              if (tens === 1 && ones === 5) result += 'טו';
+              else if (tens === 1 && ones === 6) result += 'טז';
+              else result += tensLetters[tens] + onesLetters[ones];
+              if (result.length > 1) result = result.slice(0, -1) + '״' + result.slice(-1);
+              else if (result.length === 1) result += '׳';
               return result;
             }
             
-            // Convert Hebrew date to Gregorian
-            function hebrewToGregorian(hYear, hMonth, hDay) {
-              // Calculate days from Hebrew epoch
-              let days = hebrewElapsedDays(hYear);
-              
-              // Add days for months
-              for (let m = 1; m < hMonth; m++) {
-                days += getHebrewMonthDays(hYear, m);
-              }
-              days += hDay - 1;
-              
-              // Convert to Julian day
-              const hebrewEpoch = 347995.5;
-              const jd = days + hebrewEpoch;
-              
-              // Convert Julian day to Gregorian
-              const z = Math.floor(jd + 0.5);
-              const a = Math.floor((z - 1867216.25) / 36524.25);
-              const b = z + 1 + a - Math.floor(a / 4);
-              const c = b + 1524;
-              const d = Math.floor((c - 122.1) / 365.25);
-              const e = Math.floor(365.25 * d);
-              const f = Math.floor((c - e) / 30.6001);
-              
-              const gDay = c - e - Math.floor(30.6001 * f);
-              const gMonth = (f < 14) ? f - 1 : f - 13;
-              const gYear = (gMonth > 2) ? d - 4716 : d - 4715;
-              
-              return { year: gYear, month: gMonth, day: gDay };
-            }
-            
-            // Get Hebrew months for dropdown
             function getHebrewMonthsForYear(hYear) {
               const months = [];
               const isLeap = isHebrewLeapYear(hYear);
-              
               months.push({ num: 1, name: 'תשרי' });
               months.push({ num: 2, name: 'חשון' });
               months.push({ num: 3, name: 'כסלו' });
               months.push({ num: 4, name: 'טבת' });
               months.push({ num: 5, name: 'שבט' });
-              
               if (isLeap) {
                 months.push({ num: 6, name: 'אדר א׳' });
                 months.push({ num: 7, name: 'אדר ב׳' });
               } else {
                 months.push({ num: 6, name: 'אדר' });
               }
-              
               months.push({ num: 8, name: 'ניסן' });
               months.push({ num: 9, name: 'אייר' });
               months.push({ num: 10, name: 'סיון' });
               months.push({ num: 11, name: 'תמוז' });
               months.push({ num: 12, name: 'אב' });
               months.push({ num: 13, name: 'אלול' });
-              
               return months;
             }
             
