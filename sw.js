@@ -1,4 +1,4 @@
-const CACHE_NAME = 'taskflow-v51-family';
+const CACHE_NAME = 'taskflow-v52-family';
 const urlsToCache = [
   '/',
   '/index.html',

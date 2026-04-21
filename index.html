@@ -17051,11 +17051,11 @@ async function createFirebaseHistoryBackup() {
         const count = getCount(t => t.projectId === p.id);
         const isPersonal = !p.shared;
         const icon = isPersonal ? '<i class="fas fa-lock text-gray-400 text-[10px]" title="Personal"></i>' : '<i class="fas fa-users text-gray-400 text-[10px]" title="Shared"></i>';
-        return `<button onclick="setFilter('project','${p.id}')" data-nav="project-${p.id}" class="nav-item w-full flex items-center gap-3 px-3 py-2 hover:bg-sidebar-hover rounded-lg text-left group">
+        return `<button onclick="setFilter('project','${p.id}')" data-nav="project-${p.id}" class="nav-item w-full flex items-center gap-3 px-3 py-2 hover:bg-sidebar-hover rounded-lg text-right group">
             <span class="w-3 h-3 rounded-sm" style="background:${p.color}"></span>
             <span class="truncate flex-1">${escapeHtml(p.name)}</span>
             ${icon}
-            ${count > 0 ? `<span class="text-xs text-gray-500">${count}</span>` : ""}
+            ${count > 0 ? `<span class="mr-auto text-xs text-gray-500">${count}</span>` : ""}
           </button>`;
       }).join("");
 
@@ -17065,7 +17065,7 @@ async function createFirebaseHistoryBackup() {
         const count = getCount(t => (t.labels || []).includes(l.id));
         const isPersonal = !l.shared;
         const icon = isPersonal ? '<i class="fas fa-lock text-gray-400 text-[10px]" title="Personal"></i>' : '<i class="fas fa-users text-gray-400 text-[10px]" title="Shared"></i>';
-        return `<div class="sidebar-label-item nav-item w-full flex items-center gap-2 px-3 py-2 hover:bg-sidebar-hover rounded-lg text-left cursor-pointer"
+        return `<div class="sidebar-label-item nav-item w-full flex items-center gap-2 px-3 py-2 hover:bg-sidebar-hover rounded-lg text-right cursor-pointer"
             data-label-id="${l.id}"
             data-label-index="${index}"
             draggable="true"
@@ -17080,7 +17080,7 @@ async function createFirebaseHistoryBackup() {
             <span class="w-3 h-3 rounded-full" style="background:${l.color}"></span>
             <span class="truncate flex-1">${escapeHtml(l.name)}</span>
             ${icon}
-            ${count > 0 ? `<span class="text-xs text-gray-500">${count}</span>` : ""}
+            ${count > 0 ? `<span class="mr-auto text-xs text-gray-500">${count}</span>` : ""}
           </div>`;
       }).join("");
 
@@ -17091,11 +17091,11 @@ async function createFirebaseHistoryBackup() {
         const deleteBtn = canManage && !isWsAdmin ? `<button onclick="event.stopPropagation(); confirmRemoveTeamMemberSidebar('${e.id}', '${escapeHtml(e.name).replace(/'/g, "\\'")}')" class="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-1" title="Remove member"><i class="fas fa-times text-xs"></i></button>` : '';
         const adminBadge = isWsAdmin ? '<i class="fas fa-shield-alt text-purple-400 text-xs" title="Workspace Admin"></i>' : '';
         return `<div class="group flex items-center gap-1">
-            <button onclick="setFilter('assignee','${e.id}')" data-nav="emp-${e.id}" class="nav-item flex-1 flex items-center gap-3 px-3 py-2 hover:bg-sidebar-hover rounded-lg text-left">
+            <button onclick="setFilter('assignee','${e.id}')" data-nav="emp-${e.id}" class="nav-item flex-1 flex items-center gap-3 px-3 py-2 hover:bg-sidebar-hover rounded-lg text-right">
               <div class="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-medium" style="background:${e.color}">${e.initials}</div>
               <span class="truncate flex-1">${escapeHtml(e.name)}</span>
               ${adminBadge}
-              ${count > 0 ? `<span class="text-xs text-gray-500">${count}</span>` : ""}
+              ${count > 0 ? `<span class="mr-auto text-xs text-gray-500">${count}</span>` : ""}
             </button>
             ${deleteBtn}
           </div>`;
