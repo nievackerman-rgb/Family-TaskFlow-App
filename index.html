@@ -5465,9 +5465,20 @@ async function createFirebaseHistoryBackup() {
               <h2 class="text-2xl font-bold text-gray-800">🎂 ימי הולדת ואירועים</h2>
               <p class="text-gray-500 text-sm">ימי הולדת, ימי נישואין, ימי זיכרון ואירועים משפחתיים</p>
             </div>
-            <button onclick="showAddEventModal()" class="bg-todoist-red hover:bg-todoist-red-hover text-white px-4 py-2 rounded-lg shadow-sm font-medium transition-colors flex items-center gap-2">
-              <i class="fas fa-plus"></i> הוסף אירוע
-            </button>
+            <div class="flex gap-2">
+              <button onclick="exportEventsExcel()" class="bg-white hover:bg-gray-50 text-green-600 px-3 py-2 rounded-lg shadow-sm font-medium transition-colors flex items-center gap-2 border border-gray-200" title="ייצוא Excel">
+                <i class="fas fa-file-excel"></i>
+              </button>
+              <button onclick="showImportEventsModal()" class="bg-white hover:bg-gray-50 text-blue-600 px-3 py-2 rounded-lg shadow-sm font-medium transition-colors flex items-center gap-2 border border-gray-200" title="ייבוא Excel">
+                <i class="fas fa-file-upload"></i>
+              </button>
+              <button onclick="downloadEventsExcelTemplate()" class="bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg shadow-sm font-medium transition-colors flex items-center gap-2 border border-gray-200" title="הורד תבנית">
+                <i class="fas fa-file-download"></i>
+              </button>
+              <button onclick="showAddEventModal()" class="bg-todoist-red hover:bg-todoist-red-hover text-white px-4 py-2 rounded-lg shadow-sm font-medium transition-colors flex items-center gap-2">
+                <i class="fas fa-plus"></i> הוסף אירוע
+              </button>
+            </div>
           </div>
           
           <div id="events-container"></div>
@@ -14420,6 +14431,338 @@ async function createFirebaseHistoryBackup() {
         </div>
         <div class="flex justify-end mt-6"><button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">סגור</button></div></div>`);
     }
+    // =============================================
+    // EVENTS EXCEL IMPORT / EXPORT
+    // =============================================
+    
+    const _EVENT_TYPE_HEB_TO_INTERNAL = {
+      'יום הולדת': 'birthday',
+      'יום נישואין': 'anniversary',
+      'יום זיכרון': 'memorial',
+      'אחר': 'other'
+    };
+    const _EVENT_TYPE_INTERNAL_TO_HEB = {
+      'birthday': 'יום הולדת',
+      'anniversary': 'יום נישואין',
+      'memorial': 'יום זיכרון',
+      'other': 'אחר'
+    };
+    const _YESNO_TO_BOOL = (v, defaultVal) => {
+      if (v === undefined || v === null || v === '') return defaultVal;
+      const s = v.toString().trim().toLowerCase();
+      if (s === 'כן' || s === 'yes' || s === 'true' || s === '1' || s === 'y') return true;
+      if (s === 'לא' || s === 'no' || s === 'false' || s === '0' || s === 'n') return false;
+      return defaultVal;
+    };
+    const _BOOL_TO_YESNO = (b) => b ? 'כן' : 'לא';
+    
+    // Parse DD/MM or DD/MM/YYYY or YYYY-MM-DD
+    function _parseGregorianDate(input) {
+      if (!input) return { month: null, day: null };
+      const s = input.toString().trim();
+      if (!s) return { month: null, day: null };
+      
+      // ISO format YYYY-MM-DD
+      let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (m) return { day: parseInt(m[3], 10), month: parseInt(m[2], 10) };
+      
+      // DD/MM/YYYY or DD/MM or DD.MM.YYYY or DD-MM
+      m = s.match(/^(\d{1,2})[\/\.\-](\d{1,2})(?:[\/\.\-](\d{2,4}))?$/);
+      if (m) return { day: parseInt(m[1], 10), month: parseInt(m[2], 10) };
+      
+      return { month: null, day: null };
+    }
+    
+    // Parse Hebrew date string like "ט״ו בניסן" or "15 ניסן" or "ד' אייר"
+    function _parseHebrewDateString(input) {
+      if (!input) return null;
+      const s = input.toString().trim();
+      if (!s) return null;
+      
+      const tokens = s.split(/\s+/).filter(Boolean);
+      if (tokens.length < 2) return null;
+      
+      let dayStr, monthStr;
+      if (tokens.length >= 3 && (tokens[tokens.length-2] === 'אדר' || tokens[tokens.length-2].startsWith('אדר'))) {
+        dayStr = tokens.slice(0, -2).join(' ');
+        monthStr = tokens.slice(-2).join(' ');
+      } else {
+        dayStr = tokens.slice(0, -1).join(' ');
+        monthStr = tokens[tokens.length - 1];
+      }
+      
+      if (monthStr.startsWith('ב') && monthStr.length > 1 && !monthStr.startsWith('בא')) {
+        monthStr = monthStr.substring(1);
+      }
+      
+      const strip = (x) => (x || '').toString()
+        .replace(/[׳'`ʹ]/g, '')
+        .replace(/[״"ʺ]/g, '')
+        .replace(/[\u0591-\u05BD\u05BF-\u05C7]/g, '')
+        .replace(/\s+/g, '')
+        .trim();
+      
+      const monthStrNorm = strip(monthStr);
+      const monthAliases = {
+        'תשרי': 1,
+        'חשון': 2, 'חשוון': 2, 'מרחשון': 2, 'מרחשוון': 2,
+        'כסלו': 3, 'כסליו': 3,
+        'טבת': 4,
+        'שבט': 5,
+        'אדר': 6, 'אדרא': 6, 'אדרראשון': 6,
+        'אדרב': 7, 'אדרשני': 7,
+        'ניסן': 8,
+        'אייר': 9, 'איר': 9,
+        'סיון': 10, 'סיוון': 10,
+        'תמוז': 11,
+        'אב': 12, 'מנחםאב': 12,
+        'אלול': 13
+      };
+      
+      const month = monthAliases[monthStrNorm];
+      if (!month) return null;
+      
+      const dayStrStripped = strip(dayStr);
+      let day = null;
+      
+      if (/^\d+$/.test(dayStrStripped)) {
+        day = parseInt(dayStrStripped, 10);
+      } else {
+        const letterValues = { 'א':1,'ב':2,'ג':3,'ד':4,'ה':5,'ו':6,'ז':7,'ח':8,'ט':9,'י':10,'כ':20,'ך':20,'ל':30 };
+        let total = 0;
+        let ok = true;
+        for (const ch of dayStrStripped) {
+          if (letterValues[ch] !== undefined) total += letterValues[ch];
+          else { ok = false; break; }
+        }
+        if (ok && total >= 1 && total <= 30) day = total;
+      }
+      
+      if (day === null || day < 1 || day > 30) return null;
+      return { day, month };
+    }
+    
+    // Format a Hebrew day/month as a string like "ט״ו בניסן"
+    function _formatHebrewDateString(hMonth, hDay) {
+      if (!hMonth || !hDay) return '';
+      const dayStr = hebrewDayNames[hDay] || hDay.toString();
+      const monthStr = hebrewMonthNames[hMonth] || '';
+      if (!monthStr) return '';
+      return `${dayStr} ${monthStr}`;
+    }
+    
+    async function exportEventsExcel() {
+      try {
+        if (typeof XLSX === 'undefined') await loadSheetJS();
+      } catch (e) {
+        showToast('שגיאה בטעינת ספריית Excel', 'error');
+        return;
+      }
+      
+      const wb = XLSX.utils.book_new();
+      const events = state.events || [];
+      
+      const data = events.map(e => ({
+        'שם': e.name || '',
+        'סוג': _EVENT_TYPE_INTERNAL_TO_HEB[e.type] || e.type || 'אחר',
+        'תאריך לועזי': (e.day && e.month) ? `${String(e.day).padStart(2,'0')}/${String(e.month).padStart(2,'0')}` : '',
+        'שנת לידה': e.birthYear || '',
+        'תאריך עברי': _formatHebrewDateString(e.hebrewMonth, e.hebrewDay),
+        'הצג לועזי': _BOOL_TO_YESNO(e.showGregorian !== false),
+        'הצג עברי': _BOOL_TO_YESNO(!!e.showHebrew),
+        'הערות': e.notes || ''
+      }));
+      
+      const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{
+        'שם': '', 'סוג': '', 'תאריך לועזי': '', 'שנת לידה': '',
+        'תאריך עברי': '', 'הצג לועזי': '', 'הצג עברי': '', 'הערות': ''
+      }]);
+      XLSX.utils.book_append_sheet(wb, ws, 'אירועים');
+      
+      const timestamp = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `events-${timestamp}.xlsx`);
+      showToast('קובץ Excel הורד!', 'success');
+    }
+    
+    async function downloadEventsExcelTemplate() {
+      try {
+        if (typeof XLSX === 'undefined') await loadSheetJS();
+      } catch (e) {
+        showToast('שגיאה בטעינת ספריית Excel', 'error');
+        return;
+      }
+      
+      const wb = XLSX.utils.book_new();
+      
+      // Example sheet
+      const templateData = [
+        { 'שם': 'יונתן', 'סוג': 'יום הולדת', 'תאריך לועזי': '15/03', 'שנת לידה': 2015, 'תאריך עברי': '', 'הצג לועזי': 'כן', 'הצג עברי': 'לא', 'הערות': '' },
+        { 'שם': 'סבתא רחל', 'סוג': 'יום הולדת', 'תאריך לועזי': '', 'שנת לידה': 1950, 'תאריך עברי': 'ג\' אייר', 'הצג לועזי': 'לא', 'הצג עברי': 'כן', 'הערות': 'לא לשכוח להתקשר' },
+        { 'שם': 'יום נישואין', 'סוג': 'יום נישואין', 'תאריך לועזי': '10/08', 'שנת לידה': 2005, 'תאריך עברי': '', 'הצג לועזי': 'כן', 'הצג עברי': 'לא', 'הערות': '' },
+        { 'שם': 'יום זיכרון לסבא', 'סוג': 'יום זיכרון', 'תאריך לועזי': '', 'שנת לידה': '', 'תאריך עברי': 'י\"ב חשון', 'הצג לועזי': 'לא', 'הצג עברי': 'כן', 'הערות': '' }
+      ];
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      XLSX.utils.book_append_sheet(wb, ws, 'אירועים');
+      
+      // Help sheet
+      const helpData = [
+        { 'עמודה': 'שם', 'תיאור': 'שם האירוע או שם האדם (חובה)' },
+        { 'עמודה': 'סוג', 'תיאור': 'יום הולדת / יום נישואין / יום זיכרון / אחר (חובה)' },
+        { 'עמודה': 'תאריך לועזי', 'תיאור': 'פורמט DD/MM למשל 15/03' },
+        { 'עמודה': 'שנת לידה', 'תיאור': 'לחישוב גיל - אופציונלי (למשל 2015)' },
+        { 'עמודה': 'תאריך עברי', 'תיאור': 'למשל "ט״ו ניסן" או "15 ניסן" או "ג\' אייר"' },
+        { 'עמודה': 'הצג לועזי', 'תיאור': 'כן / לא - האם להציג לפי התאריך הלועזי' },
+        { 'עמודה': 'הצג עברי', 'תיאור': 'כן / לא - האם להציג לפי התאריך העברי' },
+        { 'עמודה': 'הערות', 'תיאור': 'טקסט חופשי - אופציונלי' },
+        { 'עמודה': '', 'תיאור': '' },
+        { 'עמודה': 'חשוב:', 'תיאור': 'צריך למלא לפחות תאריך לועזי או תאריך עברי' }
+      ];
+      const wsHelp = XLSX.utils.json_to_sheet(helpData);
+      XLSX.utils.book_append_sheet(wb, wsHelp, 'הוראות');
+      
+      XLSX.writeFile(wb, 'events-template.xlsx');
+      showToast('תבנית הורדה!', 'success');
+    }
+    
+    function showImportEventsModal() {
+      showModal(`<div class="p-6">
+        <h2 class="text-xl font-semibold mb-4">ייבוא אירועים מ-Excel</h2>
+        <div class="space-y-4">
+          <div class="bg-blue-50 p-4 rounded-lg">
+            <h3 class="font-medium text-blue-800 mb-2">הוראות:</h3>
+            <ol class="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+              <li>הורד תבנית (כפתור "תבנית") אם אין לך קובץ עדיין</li>
+              <li>מלא את הנתונים בגיליון "אירועים"</li>
+              <li>עמודות חובה: <strong>שם</strong>, <strong>סוג</strong>, ואחד מ-<strong>תאריך לועזי</strong> או <strong>תאריך עברי</strong></li>
+              <li>"סוג": יום הולדת / יום נישואין / יום זיכרון / אחר</li>
+              <li>תאריך לועזי בפורמט DD/MM (למשל 15/03)</li>
+              <li>תאריך עברי: "ט״ו ניסן" או "15 ניסן" או "ד' אייר"</li>
+              <li>העלה את הקובץ כאן</li>
+            </ol>
+          </div>
+          <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+            <input type="file" id="import-events-file" accept=".xlsx,.xls" onchange="handleImportEventsFile(event)" class="hidden">
+            <label for="import-events-file" class="cursor-pointer">
+              <div class="text-4xl mb-2">📁</div>
+              <div class="text-gray-600">לחץ לבחירת קובץ Excel</div>
+              <div class="text-sm text-gray-400 mt-1">.xlsx או .xls</div>
+            </label>
+          </div>
+        </div>
+        <div class="flex justify-end mt-4">
+          <button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">ביטול</button>
+        </div>
+      </div>`);
+    }
+    
+    async function handleImportEventsFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      try {
+        if (typeof XLSX === 'undefined') await loadSheetJS();
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const wb = XLSX.read(data, { type: 'array' });
+            
+            const ws = wb.Sheets['אירועים'] || wb.Sheets[wb.SheetNames[0]];
+            if (!ws) {
+              showToast('לא נמצא גיליון בקובץ', 'error');
+              return;
+            }
+            const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+            
+            if (!rows || rows.length === 0) {
+              showToast('הקובץ ריק', 'error');
+              return;
+            }
+            
+            if (!state.events) state.events = [];
+            let imported = 0;
+            let skipped = 0;
+            const errors = [];
+            
+            rows.forEach((row, idx) => {
+              const name = (row['שם'] || '').toString().trim();
+              if (!name) { skipped++; return; }
+              
+              const typeHeb = (row['סוג'] || '').toString().trim();
+              const type = _EVENT_TYPE_HEB_TO_INTERNAL[typeHeb] || 'other';
+              
+              const greg = _parseGregorianDate(row['תאריך לועזי']);
+              const heb = _parseHebrewDateString(row['תאריך עברי']);
+              
+              // Need at least one valid date
+              if ((!greg.month || !greg.day) && !heb) {
+                errors.push(`שורה ${idx+2}: חסר תאריך תקין עבור "${name}"`);
+                skipped++;
+                return;
+              }
+              
+              const birthYearRaw = row['שנת לידה'];
+              const birthYear = birthYearRaw ? parseInt(birthYearRaw, 10) : null;
+              
+              const defaultShowGreg = !!(greg.month && greg.day);
+              const defaultShowHeb = !!heb && !defaultShowGreg;
+              
+              const ev = {
+                id: 'evt_' + Date.now() + '_' + imported + '_' + Math.random().toString(36).slice(2, 7),
+                name: name,
+                type: type,
+                month: greg.month || null,
+                day: greg.day || null,
+                birthYear: (birthYear && !isNaN(birthYear)) ? birthYear : null,
+                hebrewMonth: heb ? heb.month : null,
+                hebrewDay: heb ? heb.day : null,
+                showGregorian: _YESNO_TO_BOOL(row['הצג לועזי'], defaultShowGreg),
+                showHebrew: _YESNO_TO_BOOL(row['הצג עברי'], defaultShowHeb),
+                notes: (row['הערות'] || '').toString().trim(),
+                createdAt: new Date().toISOString()
+              };
+              
+              // Duplicate check: same name + same greg date OR same heb date
+              const isDup = state.events.some(existing => {
+                if (existing.name !== ev.name) return false;
+                if (ev.month && ev.day && existing.month === ev.month && existing.day === ev.day) return true;
+                if (ev.hebrewMonth && ev.hebrewDay && existing.hebrewMonth === ev.hebrewMonth && existing.hebrewDay === ev.hebrewDay) return true;
+                return false;
+              });
+              if (isDup) { skipped++; return; }
+              
+              state.events.push(ev);
+              imported++;
+            });
+            
+            saveState();
+            closeModal();
+            if (typeof renderEventsView === 'function') renderEventsView();
+            if (typeof renderAll === 'function') renderAll();
+            
+            let msg = `יובאו ${imported} אירועים`;
+            if (skipped > 0) msg += ` (${skipped} דולגו)`;
+            showToast(msg, imported > 0 ? 'success' : 'info');
+            
+            if (errors.length > 0) {
+              console.warn('Event import errors:', errors);
+            }
+            
+          } catch (err) {
+            console.error('Import error:', err);
+            showToast('שגיאה בייבוא: ' + err.message, 'error');
+          }
+        };
+        
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        showToast('שגיאה בקריאת הקובץ', 'error');
+      }
+      
+      event.target.value = '';
+    }
+    
 
     // =============================================
     // DAILY PLANNER VIEW
