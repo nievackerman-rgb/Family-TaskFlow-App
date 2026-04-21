@@ -1,7 +1,7 @@
 {
-  "name": "TaskFlow Pro",
-  "short_name": "TaskFlow",
-  "description": "Team Task Management App",
+  "name": "TaskFlow Family",
+  "short_name": "TaskFlow Family",
+  "description": "אפליקציית ניהול משימות משפחתית",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1f2937",
